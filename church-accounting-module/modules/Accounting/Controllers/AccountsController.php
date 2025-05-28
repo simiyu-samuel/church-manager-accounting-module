@@ -60,4 +60,57 @@ class AccountsController extends Controller
         }
         return view('accounts.journal_entries', compact('journalTxns', 'totalDebit', 'totalCredit', 'accounts'));
     }
+        public function trialBalance(Request $request)
+{
+    $startDate = $request->start_date;
+    $endDate = $request->end_date;
+
+    $accounts = PaymentAccount::with([
+        'debitTxns' => function ($q) use ($startDate, $endDate) {
+            if ($startDate) $q->whereDate('date', '>=', $startDate);
+            if ($endDate) $q->whereDate('date', '<=', $endDate);
+        },
+        'creditTxns' => function ($q) use ($startDate, $endDate) {
+            if ($startDate) $q->whereDate('date', '>=', $startDate);
+            if ($endDate) $q->whereDate('date', '<=', $endDate);
+        }
+    ])->get();
+
+    $trialData = $accounts->map(function ($account) {
+        $totalDebit = $account->debitTxns->sum('amount');
+        $totalCredit = $account->creditTxns->sum('amount');
+
+        switch ($account->type) {
+            case 'asset':
+            case 'expense':
+                $balance = $totalDebit - $totalCredit;
+                $debit = $balance >= 0 ? $balance : 0;
+                $credit = $balance < 0 ? abs($balance) : 0;
+                break;
+            case 'liability':
+            case 'equity':
+            case 'income':
+                $balance = $totalCredit - $totalDebit;
+                $debit = $balance < 0 ? abs($balance) : 0;
+                $credit = $balance >= 0 ? $balance : 0;
+                break;
+            default:
+                $debit = 0;
+                $credit = 0;
+        }
+
+        return [
+            'account' => $account->account,
+            'code' => $account->code,
+            'description' => $account->description,
+            'debit' => $debit,
+            'credit' => $credit,
+        ];
+    });
+
+    $totalDebit = $trialData->sum('debit');
+    $totalCredit = $trialData->sum('credit');
+
+    return view('accounts.trial_balance', compact('trialData', 'totalDebit', 'totalCredit', 'startDate', 'endDate'));
+}
 }
