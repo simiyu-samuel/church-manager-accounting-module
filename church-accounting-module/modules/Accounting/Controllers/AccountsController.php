@@ -167,4 +167,81 @@ class AccountsController extends Controller
 
     return view('accounts.ledger', compact('accounts', 'ledgerTxns', 'account', 'startDate', 'endDate'));
 }
+
+public function balanceSheet(Request $request)
+{
+    // Get cutoff date or default to today
+    $cutoffDate = $request->input('date', now()->toDateString());
+
+    // Fetch all accounts
+    $accounts = PaymentAccount::all();
+
+    // Prepare balances array grouped by type
+    $balancesByType = [
+        'asset' => [],
+        'liability' => [],
+        'equity' => [],
+    ];
+
+    // Totals per type
+    $totals = [
+        'asset' => 0,
+        'liability' => 0,
+        'equity' => 0,
+    ];
+
+    foreach ($accounts as $account) {
+        // Sum debit and credit amounts for this account up to cutoff date
+        $debitSum = JournalTxn::where('debit_account_id', $account->id)
+                              ->whereDate('date', '<=', $cutoffDate)
+                              ->sum('amount');
+
+        $creditSum = JournalTxn::where('credit_account_id', $account->id)
+                               ->whereDate('date', '<=', $cutoffDate)
+                               ->sum('amount');
+
+        // Calculate balance depending on account type
+        switch ($account->type) {
+            case 'asset':
+            case 'expense': // Optional: include if needed
+                $balance = $debitSum - $creditSum;
+                break;
+
+            case 'liability':
+            case 'equity':
+            case 'income': // Optional
+                $balance = $creditSum - $debitSum;
+                break;
+
+            default:
+                $balance = 0;
+        }
+
+        // Ignore accounts with zero balance for cleaner report (optional)
+        if (abs($balance) < 0.01) {
+            continue;
+        }
+
+        // Store balance grouped by type if recognized
+        if (isset($balancesByType[$account->type])) {
+            $balancesByType[$account->type][] = [
+                'account' => $account->account,
+                'balance' => $balance,
+            ];
+            $totals[$account->type] += $balance;
+        }
+    }
+
+    // Calculate total Assets and total Liabilities + Equity
+    $totalAssets = $totals['asset'];
+    $totalLiabilitiesEquity = $totals['liability'] + $totals['equity'];
+
+    return view('accounts.balance_sheet', [
+        'balancesByType' => $balancesByType,
+        'totals' => $totals,
+        'totalAssets' => $totalAssets,
+        'totalLiabilitiesEquity' => $totalLiabilitiesEquity,
+        'cutoffDate' => $cutoffDate,
+    ]);
+}
 }
