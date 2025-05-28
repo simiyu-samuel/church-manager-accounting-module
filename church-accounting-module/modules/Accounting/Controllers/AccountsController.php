@@ -113,4 +113,58 @@ class AccountsController extends Controller
 
     return view('accounts.trial_balance', compact('trialData', 'totalDebit', 'totalCredit', 'startDate', 'endDate'));
 }
+
+
+    public function ledger(Request $request)
+{
+    $accountId = $request->account;
+    $startDate = $request->start_date;
+    $endDate = $request->end_date;
+
+    $accounts = PaymentAccount::all();
+
+    $ledgerTxns = collect();
+    $account = null;
+    $runningBalance = 0;
+
+    if ($accountId) {
+        $account = PaymentAccount::findOrFail($accountId);
+
+        $query = JournalTxn::where(function ($q) use ($accountId) {
+            $q->where('debit_account_id', $accountId)
+              ->orWhere('credit_account_id', $accountId);
+        });
+
+        if ($startDate) {
+            $query->whereDate('date', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->whereDate('date', '<=', $endDate);
+        }
+
+        $query->orderBy('date')->orderBy('id');
+
+        $ledgerTxns = $query->get()->map(function ($txn) use (&$runningBalance, $accountId) {
+            $isDebit = $txn->debit_account_id == $accountId;
+            $amount = (float) $txn->amount;
+
+            if ($isDebit) {
+                $runningBalance += $amount;
+            } else {
+                $runningBalance -= $amount;
+            }
+
+            return [
+                'id' => $txn->id,
+                'date' => $txn->date,
+                'description' => $txn->description ?? ($txn->generateDescription() ?? ''),
+                'debit' => $isDebit ? $amount : null,
+                'credit' => !$isDebit ? $amount : null,
+                'balance' => $runningBalance,
+            ];
+        });
+    }
+
+    return view('accounts.ledger', compact('accounts', 'ledgerTxns', 'account', 'startDate', 'endDate'));
+}
 }
